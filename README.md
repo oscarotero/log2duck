@@ -42,6 +42,20 @@ following columns.
 | as_name              | Name of the AS (from the ip)                      |
 | as_domain            | Domain of the AS (from the ip)                    |
 
+## Usage
+
+Run the `log2duck` command with two arguments:
+
+- The path to the log file
+- The base URL of the site (used to resolve the URLs)
+
+```sh
+log2duck example.log https://example.com
+
+# example.db  -> duckdb database
+# example.err -> file with errors found
+```
+
 ## Resources
 
 - IP info: https://ipinfo.io/products/free-ip-database (login with GitHub)

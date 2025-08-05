@@ -1,0 +1,90 @@
+on:
+  release:
+    types:
+      - created
+
+permissions:
+  contents: write
+  checks: write
+  actions: read
+  issues: read
+  packages: write
+  pull-requests: read
+  repository-projects: read
+  statuses: read
+
+jobs:
+  linux_x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Install rustup targets
+        run: rustup target add x86_64-unknown-linux-gnu
+
+      - name: Build the executable
+        run: cargo build --release --target=x86_64-unknown-linux-gnu --locked
+
+      - name: Tar Binary
+        run: tar -czvf log2duck-x86_64-unknown-linux-gnu.tar.gz -C target/x86_64-unknown-linux-gnu/release log2duck
+
+      - name: Generate SHA256 checksum
+        run: shasum -a 256 log2duck-x86_64-unknown-linux-gnu.tar.gz > log2duck-x86_64-unknown-linux-gnu.tar.gz.sha256
+
+      - name: Upload release binaries
+        uses: alexellis/upload-assets@0.4.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          asset_paths: '["log2duck-x86_64-unknown-linux-gnu.tar.gz", "log2duck-x86_64-unknown-linux-gnu.tar.gz.sha256"]'
+
+  mac_x86_64:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Install rustup targets
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Build the executables
+        run: cargo build --release --target=x86_64-apple-darwin --locked
+
+      - name: Tar binary
+        run: tar -czvf log2duck-x86_64-apple-darwin.tar.gz -C target/x86_64-apple-darwin/release log2duck
+
+      - name: Generate SHA256 checksum
+        run: shasum -a 256 log2duck-x86_64-apple-darwin.tar.gz > log2duck-x86_64-apple-darwin.tar.gz.sha256
+
+      - name: Upload release binaries
+        uses: alexellis/upload-assets@0.4.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          asset_paths: '["log2duck-x86_64-apple-darwin.tar.gz", "log2duck-x86_64-apple-darwin.tar.gz.sha256"]'
+
+  mac_aarch64:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Install rustup targets
+        run: rustup target add aarch64-apple-darwin
+
+      - name: Build the executables
+        run: cargo build --release --target=aarch64-apple-darwin --locked
+
+      - name: Tar binaries
+        run: tar -czvf log2duck-aarch64-apple-darwin.tar.gz -C target/aarch64-apple-darwin/release log2duck
+
+      - name: Generate SHA256 checksums
+        run: shasum -a 256 log2duck-aarch64-apple-darwin.tar.gz > log2duck-aarch64-apple-darwin.tar.gz.sha256
+
+      - name: Upload release binaries
+        uses: alexellis/upload-assets@0.4.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          asset_paths: '["log2duck-aarch64-apple-darwin.tar.gz", "log2duck-aarch64-apple-darwin.tar.gz.sha256"]'

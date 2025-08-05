@@ -1,4 +1,6 @@
 use duckdb::{params, Connection};
+use log2duck::ParseConfig;
+use log2duck::{LogEntry, LogError, ParserServices};
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
@@ -6,14 +8,12 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::{self, BufRead};
 use std::path::Path;
-use toxo::ParseConfig;
-use toxo::{LogEntry, LogError, ParserServices};
 
 fn main() -> () {
     let args: Vec<String> = env::args().collect();
 
     // Show help() if there's no arguments
-    if args.len() < 2 {
+    if args.len() < 3 {
         return help();
     }
 
@@ -105,7 +105,7 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
                 } else {
                     existing = existing + 1;
                     if existing % 50000 == 0 {
-                        println!("Skipped logs: {}", existing);
+                        println!("Skipped duplicated logs: {}", existing);
                     }
                 }
                 continue;
