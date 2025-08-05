@@ -44,6 +44,12 @@ following columns.
 
 ## Usage
 
+Installation (macOS & Linux only):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/oscarotero/log2duck/refs/heads/main/install.sh | sh
+```
+
 Run the `log2duck` command with two arguments:
 
 - The path to the log file
