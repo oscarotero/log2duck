@@ -103,6 +103,7 @@ impl ParseConfig {
 }
 
 pub struct LogEntry {
+    pub line: String,
     pub ip: IpAddr,
     pub identity: Option<String>,
     pub user: Option<String>,
@@ -330,6 +331,7 @@ impl LogEntry {
         };
 
         Ok(LogEntry {
+            line,
             ip,
             identity,
             user,

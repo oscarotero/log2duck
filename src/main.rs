@@ -93,6 +93,7 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
     let mut services = ParserServices::new();
     let mut new = 0;
     let mut existing = 0;
+    let mut err_found = 0;
     println!("Searching new logs...");
 
     // Append logs to the database
@@ -101,6 +102,7 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
             Ok(log) => log,
             Err(error) => {
                 if !error.is_filtered() {
+                    err_found = err_found + 1;
                     writeln!(error_file, "{}", error).unwrap();
                 } else {
                     existing = existing + 1;
@@ -112,7 +114,7 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
             }
         };
 
-        app.append_row(params![
+        let result = app.append_row(params![
             log.ip.to_string(),
             log.identity,
             log.user,
@@ -151,8 +153,13 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
             log.asn,
             log.as_name,
             log.as_domain,
-        ])
-        .unwrap();
+        ]);
+
+        if let Err(err) = result {
+            err_found = err_found + 1;
+            writeln!(error_file, "Database error: {} ({})", log.line, err).unwrap();
+            continue;
+        }
 
         new = new + 1;
         if new % 50000 == 0 {
@@ -162,7 +169,14 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
 
     println!("Process finished!");
     println!("{} logs added to the database {}", new, output);
-    println!("Errors are logged in the file {}", errors);
+
+    if let Ok(data) = error_file.metadata() {
+        if data.len() > 0 {
+            println!("{err_found} errors were saved to {}", errors);
+        } else {
+            std::fs::remove_file(errors).unwrap();
+        }
+    }
 }
 
 fn hashmap_to_string(map: &HashMap<String, String>) -> String {
