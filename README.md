@@ -13,7 +13,6 @@ following columns.
 | path                 | Path of the URL                                   |
 | extension            | Extension of the path                             |
 | query                | Raw query params                                  |
-| parsed_query         | Map with the parsed query params                  |
 | http_version         | Enum with the HTTP version                        |
 | status_code          | Response's status code                            |
 | size                 | The size of the response                          |
@@ -21,7 +20,6 @@ following columns.
 | referer_origin       | Referer origin                                    |
 | referer_path         | Referer path                                      |
 | referer_query        | Referer raw query string                          |
-| referer_parsed_query | Map with the referer parsed query                 |
 | user_agent           | Raw user agent string                             |
 | browser              | Detected browser name (from the user agent)       |
 | browser_major        | Browser major version (from the user agent)       |
