@@ -1,7 +1,6 @@
 use duckdb::{params, Connection};
 use log2duck::ParseConfig;
 use log2duck::{LogEntry, LogError, ParserServices};
-use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -42,7 +41,6 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
         path                 VARCHAR NOT NULL,
         extension            VARCHAR,
         query                VARCHAR,
-        parsed_query         MAP(VARCHAR, VARCHAR),
         http_version         HTTP_VERSION NOT NULL,
         status_code          USMALLINT NOT NULL,
         size                 UINTEGER NOT NULL,
@@ -50,7 +48,6 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
         referer_origin       VARCHAR,
         referer_path         VARCHAR,
         referer_query        VARCHAR,
-        referer_parsed_query VARCHAR,
         user_agent           VARCHAR,
         browser              VARCHAR,
         browser_major        USMALLINT,
@@ -123,7 +120,6 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
             log.path,
             log.extension,
             log.query,
-            log.parsed_query.map(|query| hashmap_to_string(&query)),
             log.http_version.to_string(),
             log.status_code,
             log.size,
@@ -132,8 +128,6 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
                 .map(|origin| origin.unicode_serialization()),
             log.referer_path,
             log.referer_query,
-            log.referer_parsed_query
-                .map(|query| hashmap_to_string(&query)),
             log.user_agent,
             log.browser,
             log.browser_major,
@@ -177,18 +171,6 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
             std::fs::remove_file(errors).unwrap();
         }
     }
-}
-
-fn hashmap_to_string(map: &HashMap<String, String>) -> String {
-    let entries: Vec<String> = map
-        .iter()
-        .map(|(k, v)| format!("'{}'='{}'", escape(k), escape(v)))
-        .collect();
-    format!("{{{}}}", entries.join(", "))
-}
-
-fn escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace("'", "\\'")
 }
 
 fn parse_line<'a>(

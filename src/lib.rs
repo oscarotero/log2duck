@@ -112,7 +112,6 @@ pub struct LogEntry {
     pub path: String,
     pub extension: Option<String>,
     pub query: Option<String>,
-    pub parsed_query: Option<HashMap<String, String>>,
     pub http_version: HttpVersion,
     pub status_code: u16,
     pub size: usize,
@@ -120,7 +119,6 @@ pub struct LogEntry {
     pub referer_origin: Option<Origin>,
     pub referer_path: Option<String>,
     pub referer_query: Option<String>,
-    pub referer_parsed_query: Option<HashMap<String, String>>,
     pub user_agent: Option<String>,
 
     pub browser: Option<String>,
@@ -217,11 +215,6 @@ impl LogEntry {
         }
         let path = url.path().to_string();
         let query = url.query().map(|q| q.to_string());
-        let parsed_query = query.as_ref().map(|_| {
-            url.query_pairs()
-                .into_owned()
-                .collect::<HashMap<String, String>>()
-        });
 
         let extension = Path::new(&path)
             .extension()
@@ -251,22 +244,16 @@ impl LogEntry {
         let (referer, next) =
             find(next + 2, &line, &quote).map_err(|_| LogError::new(&line, "Referer not found"))?;
         let referer = Url::parse(&referer).ok();
-        let (referer_origin, referer_path, referer_query, referer_parsed_query) =
-            referer.as_ref().map_or_else(
-                || (None, None, None, None),
-                |url| {
-                    (
-                        Some(url.origin()),
-                        Some(url.path().to_string()),
-                        url.query().map(|q| q.to_string()),
-                        url.query().as_ref().map(|_| {
-                            url.query_pairs()
-                                .into_owned()
-                                .collect::<HashMap<String, String>>()
-                        }),
-                    )
-                },
-            );
+        let (referer_origin, referer_path, referer_query) = referer.as_ref().map_or_else(
+            || (None, None, None),
+            |url| {
+                (
+                    Some(url.origin()),
+                    Some(url.path().to_string()),
+                    url.query().map(|q| q.to_string()),
+                )
+            },
+        );
 
         // Parse user agent
         let (user_agent, _) = find(next + 3, &line, &quote)
@@ -340,7 +327,6 @@ impl LogEntry {
             path,
             extension,
             query,
-            parsed_query,
             http_version,
             status_code,
             size,
@@ -348,7 +334,6 @@ impl LogEntry {
             referer_origin,
             referer_path,
             referer_query,
-            referer_parsed_query,
             user_agent,
             browser,
             browser_major,
