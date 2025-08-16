@@ -1,0 +1,10 @@
+steps:
+  build:
+    when:
+      event: push
+    image: rust
+    commands:
+      - rustup target add x86_64-unknown-linux-gnu
+      - cargo build --release --target=x86_64-unknown-linux-gnu --locked -j4
+      - tar -czvf log2duck-x86_64-unknown-linux-gnu.tar.gz -C target/x86_64-unknown-linux-gnu/release log2duck
+      - shasum -a 256 log2duck-x86_64-unknown-linux-gnu.tar.gz > log2duck-x86_64-unknown-linux-gnu.tar.gz.sha256
