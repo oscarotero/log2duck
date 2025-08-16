@@ -24,7 +24,7 @@ jobs:
         run: rustup target add x86_64-unknown-linux-gnu
 
       - name: Build the executable
-        run: cargo build --release --target=x86_64-unknown-linux-gnu --locked
+        run: cargo build --release --target=x86_64-unknown-linux-gnu --locked -j4
 
       - name: Tar Binary
         run: tar -czvf log2duck-x86_64-unknown-linux-gnu.tar.gz -C target/x86_64-unknown-linux-gnu/release log2duck
@@ -49,7 +49,7 @@ jobs:
         run: rustup target add x86_64-apple-darwin
 
       - name: Build the executables
-        run: cargo build --release --target=x86_64-apple-darwin --locked
+        run: cargo build --release --target=x86_64-apple-darwin --locked -j4
 
       - name: Tar binary
         run: tar -czvf log2duck-x86_64-apple-darwin.tar.gz -C target/x86_64-apple-darwin/release log2duck
@@ -74,7 +74,7 @@ jobs:
         run: rustup target add aarch64-apple-darwin
 
       - name: Build the executables
-        run: cargo build --release --target=aarch64-apple-darwin --locked
+        run: cargo build --release --target=aarch64-apple-darwin --locked -j4
 
       - name: Tar binaries
         run: tar -czvf log2duck-aarch64-apple-darwin.tar.gz -C target/aarch64-apple-darwin/release log2duck
