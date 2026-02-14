@@ -1,6 +1,6 @@
 use duckdb::{params, Connection};
-use log2duck::ParseConfig;
 use log2duck::{LogEntry, LogError, ParserServices};
+use log2duck::{ParseConfig, ParsedLogEntry};
 use std::env;
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -21,10 +21,10 @@ fn main() -> () {
     let output = replace_extension(&input, ".db");
     let errors = replace_extension(&input, ".err");
 
-    return parse(input, &output, &errors, origin);
+    return parse(input, &output, &errors, origin, false);
 }
 
-fn parse(input: &str, output: &str, errors: &str, origin: &str) {
+fn parse(input: &str, output: &str, errors: &str, origin: &str, is_json: bool) {
     println!("Preparing to read log file...");
 
     // Create the duckdb database and the required tables
@@ -94,7 +94,7 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
     println!("Searching new logs...");
 
     // Append logs to the database
-    for result in parse_line(lines, &mut services, config) {
+    for result in parse_line(lines, &mut services, config, is_json) {
         let log = match result {
             Ok(log) => log,
             Err(error) => {
@@ -151,7 +151,7 @@ fn parse(input: &str, output: &str, errors: &str, origin: &str) {
 
         if let Err(err) = result {
             err_found = err_found + 1;
-            writeln!(error_file, "Database error: {} ({})", log.line, err).unwrap();
+            writeln!(error_file, "Database error: ({})", err).unwrap();
             continue;
         }
 
@@ -177,8 +177,20 @@ fn parse_line<'a>(
     iterator: impl Iterator<Item = String> + 'a,
     mut services: &'a mut ParserServices,
     config: ParseConfig,
+    is_json: bool,
 ) -> Box<dyn Iterator<Item = Result<LogEntry, LogError>> + 'a> {
-    Box::new(iterator.map(move |line| LogEntry::parse(line, &mut services, &config)))
+    Box::new(iterator.map(move |line| {
+        let parsed = if is_json {
+            ParsedLogEntry::from_json(line, &config)
+        } else {
+            ParsedLogEntry::from_combined(line, &config)
+        };
+
+        match parsed {
+            Ok(parsed) => parsed.to_entry(&mut services),
+            Err(err) => Err(err),
+        }
+    }))
 }
 
 fn read_log_file(filename: &str) -> impl Iterator<Item = String> {

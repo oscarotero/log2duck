@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use maxminddb::Reader;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::IpAddr;
 use std::path::Path;
@@ -102,8 +103,346 @@ impl ParseConfig {
     }
 }
 
-pub struct LogEntry {
+pub struct ParsedLogEntry {
     pub line: String,
+    pub ip: String,
+    pub identity: Option<String>,
+    pub user: Option<String>,
+    pub timestamp: DateTime<Utc>,
+    pub method: String,
+    pub url: Url,
+    pub http_version: String,
+    pub status_code: u16,
+    pub size: usize,
+    pub referer: Option<Url>,
+    pub user_agent: Option<String>,
+}
+
+impl ParsedLogEntry {
+    pub fn from_json(line: String, config: &ParseConfig) -> Result<ParsedLogEntry, LogError> {
+        let parsed_line: JsonLine = match serde_json::from_str(&line) {
+            Ok(result) => result,
+            Err(err) => {
+                return Err(LogError::new(
+                    &line,
+                    &format!("Error parsing JSON line {}", err),
+                ))
+            }
+        };
+
+        // Parse ip
+        let ip: String = parsed_line.request.client_ip;
+
+        // Parse user
+        let user: Option<String> = Some(parsed_line.user_id);
+
+        // Parse timestamp
+        let timestamp: DateTime<Utc> =
+            match DateTime::from_timestamp(parsed_line.ts.round() as i64, 0) {
+                Some(result) => result,
+                None => return Err(LogError::new(&line, "Invalid timestamp")),
+            };
+        if timestamp.timestamp_micros() <= config.timestamp {
+            return Err(LogError::new_filtered(&line));
+        }
+
+        // Method
+        let method: String = parsed_line.request.method;
+
+        // HTTP version
+        let http_version: String = parsed_line.request.proto;
+
+        // Parse URL
+        let mut url = config
+            .origin
+            .join(&parsed_line.request.uri)
+            .map_err(|_| LogError::new(&line, "Path not valid"))?;
+        url.set_host(Some(&parsed_line.request.host))
+            .map_err(|_| LogError::new(&line, "Host not valid"))?;
+
+        if url.host_str() != config.origin.host_str() {
+            return Err(LogError::new(&line, "Path has a different host"));
+        }
+
+        // Parse status code
+        let status_code: u16 = parsed_line.status;
+
+        // Size
+        let size: usize = parsed_line.size;
+
+        // Referer
+        let referer: Option<Url> = match parsed_line.request.headers.get("Referer") {
+            Some(val) => match val.first() {
+                Some(str) => Url::parse(str).ok(),
+                None => None,
+            },
+            None => None,
+        };
+
+        // Parse user agent
+        let user_agent: Option<String> = match parsed_line.request.headers.get("User-Agent") {
+            Some(val) => val.first().map(|s| s.to_string()),
+            None => None,
+        };
+
+        Ok(ParsedLogEntry {
+            line,
+            ip,
+            identity: None,
+            user,
+            timestamp,
+            method,
+            url,
+            http_version,
+            status_code,
+            size,
+            referer,
+            user_agent,
+        })
+    }
+
+    pub fn from_combined(line: String, config: &ParseConfig) -> Result<ParsedLogEntry, LogError> {
+        let space = Patt::Char(' ');
+        let quote = Patt::Char('"');
+        let bracket = Patt::Char(']');
+        let http = Patt::Str(" HTTP/");
+
+        // Parse ip
+        let (ip, next) =
+            find(0, &line, &space).map_err(|_| LogError::new(&line, "IP not found"))?;
+
+        // Parse identity
+        let (identity, next) = find(next + 1, &line, &space)
+            .map_err(|_| LogError::new(&line, "Identity not found"))?;
+        let identity = match identity.as_str() {
+            "-" => None,
+            _ => Some(identity),
+        };
+
+        // Parse user
+        let (user, next) =
+            find(next + 1, &line, &space).map_err(|_| LogError::new(&line, "User not found"))?;
+        let user = match user.as_str() {
+            "-" => None,
+            _ => Some(user),
+        };
+
+        // Parse timestamp
+        let (timestamp, next) = find(next + 2, &line, &bracket)
+            .map_err(|_| LogError::new(&line, "Datetime not found"))?;
+        let timestamp = DateTime::parse_from_str(timestamp.as_str(), "%d/%b/%Y:%H:%M:%S %z")
+            .map(|parsed| parsed.with_timezone(&Utc))
+            .map_err(|_| LogError::new(&line, "Invalid datetime"))?;
+        if timestamp.timestamp_micros() <= config.timestamp {
+            return Err(LogError::new_filtered(&line));
+        }
+
+        let (request, _) =
+            find(next + 3, &line, &quote).map_err(|_| LogError::new(&line, "Request not found"))?;
+        if request.len() == 0 {
+            return Err(LogError::new(&line, "Empty request"));
+        }
+
+        // Parse method
+        let (method, next) = find(next + 3, &line, &space)
+            .map_err(|_| LogError::new(&line, "HTTP method not found"))?;
+
+        // Parse URL
+        let (mut fullpath, next) =
+            find(next + 1, &line, &http).map_err(|_| LogError::new(&line, "Path not found"))?;
+
+        while fullpath.starts_with("//") {
+            fullpath = fullpath.replacen("//", "/", 1);
+        }
+
+        let url = config
+            .origin
+            .join(&fullpath)
+            .map_err(|_| LogError::new(&line, "Path not valid"))?;
+        if url.host_str() != config.origin.host_str() {
+            return Err(LogError::new(&line, "Path has a different host"));
+        }
+
+        // Parse HTTP version
+        let (http_version, next) = find(next + 1, &line, &quote)
+            .map_err(|_| LogError::new(&line, "HTTP version not found"))?;
+
+        // Parse status code
+        let (status_code, next) = find(next + 2, &line, &space)
+            .map_err(|_| LogError::new(&line, "Status code not found"))?;
+        let status_code: u16 = status_code
+            .parse()
+            .map_err(|_| LogError::new(&line, "Invalid status code"))?;
+
+        // Parse size
+        let (size, next) =
+            find(next + 1, &line, &space).map_err(|_| LogError::new(&line, "Size not found"))?;
+        let size: usize = size
+            .parse()
+            .map_err(|_| LogError::new(&line, "Invalid size"))?;
+
+        // Parse referer
+        let (referer, next) =
+            find(next + 2, &line, &quote).map_err(|_| LogError::new(&line, "Referer not found"))?;
+        let referer = Url::parse(&referer).ok();
+
+        // Parse user agent
+        let (user_agent, _) = find(next + 3, &line, &quote)
+            .map_err(|_| LogError::new(&line, "User agent not found"))?;
+
+        let user_agent = if user_agent.is_empty() {
+            None
+        } else {
+            Some(user_agent)
+        };
+
+        Ok(ParsedLogEntry {
+            line,
+            ip,
+            identity,
+            user,
+            timestamp,
+            method,
+            url,
+            http_version,
+            status_code,
+            size,
+            referer,
+            user_agent,
+        })
+    }
+
+    pub fn to_entry(
+        self: ParsedLogEntry,
+        services: &mut ParserServices,
+    ) -> Result<LogEntry, LogError> {
+        // Parse ip
+        let ip: IpAddr = self
+            .ip
+            .parse()
+            .map_err(|_| LogError::new(&self.line, "Invalid IP"))?;
+
+        // Url parts
+        let path = self.url.path().to_string();
+        let query = self.url.query().map(|q| q.to_string());
+
+        let extension = Path::new(&path)
+            .extension()
+            .map(|ext| ext.to_str().unwrap().to_lowercase().to_string());
+
+        // Parse method
+        let method = HttpMethod::new(&self.method)
+            .map_err(|_| LogError::new(&self.line, "Invalid HTTP method"))?;
+
+        // Parse HTTP version
+        let http_version = HttpVersion::new(&self.http_version)
+            .map_err(|_| LogError::new(&self.line, "Invalid HTTP version"))?;
+
+        // Referer
+        let (referer_origin, referer_path, referer_query) = self.referer.as_ref().map_or_else(
+            || (None, None, None),
+            |url| {
+                (
+                    Some(url.origin()),
+                    Some(url.path().to_string()),
+                    url.query().map(|q| q.to_string()),
+                )
+            },
+        );
+
+        // Parse agent data
+        let (
+            browser,
+            browser_major,
+            browser_minor,
+            browser_patch,
+            browser_patch_minor,
+            os,
+            os_major,
+            os_minor,
+            os_patch,
+            os_patch_minor,
+            device,
+            brand,
+            model,
+        ) = self
+            .user_agent
+            .as_ref()
+            .map(|ua| {
+                let agent = services.get_agent(ua);
+
+                (
+                    agent.browser.clone(),
+                    agent.browser_major.clone(),
+                    agent.browser_minor.clone(),
+                    agent.browser_patch.clone(),
+                    agent.browser_patch_minor.clone(),
+                    agent.os.clone(),
+                    agent.os_major.clone(),
+                    agent.os_minor.clone(),
+                    agent.os_patch.clone(),
+                    agent.os_patch_minor.clone(),
+                    agent.device.clone(),
+                    agent.brand.clone(),
+                    agent.model.clone(),
+                )
+            })
+            .unwrap_or((
+                None, None, None, None, None, None, None, None, None, None, None, None, None,
+            ));
+
+        // Parse geolocation
+        let (country, continent, asn, as_name, as_domain) = {
+            let geolocation = services.get_geolocation(&ip);
+            (
+                geolocation.country.clone(),
+                geolocation.continent.clone(),
+                geolocation.asn.clone(),
+                geolocation.as_name.clone(),
+                geolocation.as_domain.clone(),
+            )
+        };
+
+        Ok(LogEntry {
+            ip,
+            identity: self.identity,
+            user: self.user,
+            timestamp: self.timestamp,
+            method,
+            path,
+            extension,
+            query,
+            http_version,
+            status_code: self.status_code,
+            size: self.size,
+            referer: self.referer,
+            referer_origin,
+            referer_path,
+            referer_query,
+            user_agent: self.user_agent,
+            browser,
+            browser_major,
+            browser_minor,
+            browser_patch,
+            browser_patch_minor,
+            os,
+            os_major,
+            os_minor,
+            os_patch,
+            os_patch_minor,
+            device,
+            brand,
+            model,
+            country,
+            continent,
+            asn,
+            as_name,
+            as_domain,
+        })
+    }
+}
+
+pub struct LogEntry {
     pub ip: IpAddr,
     pub identity: Option<String>,
     pub user: Option<String>,
@@ -144,217 +483,29 @@ pub struct LogEntry {
     pub as_domain: Option<String>,
 }
 
-impl LogEntry {
-    pub fn parse(
-        line: String,
-        services: &mut ParserServices,
-        config: &ParseConfig,
-    ) -> Result<LogEntry, LogError> {
-        let space = Patt::Char(' ');
-        let quote = Patt::Char('"');
-        let bracket = Patt::Char(']');
-        let http = Patt::Str(" HTTP/");
+#[derive(Serialize, Deserialize, Debug)]
+struct JsonLineRequest {
+    remote_ip: String,
+    remote_port: String,
+    client_ip: String,
+    proto: String,
+    method: String,
+    host: String,
+    uri: String,
+    headers: HashMap<String, [String; 1]>,
+}
 
-        // Parse ip
-        let (ip, next) =
-            find(0, &line, &space).map_err(|_| LogError::new(&line, "IP not found"))?;
-        let ip: IpAddr = ip.parse().map_err(|_| LogError::new(&line, "Invalid IP"))?;
-
-        // Parse identity
-        let (identity, next) = find(next + 1, &line, &space)
-            .map_err(|_| LogError::new(&line, "Identity not found"))?;
-        let identity = match identity.as_str() {
-            "-" => None,
-            _ => Some(identity),
-        };
-
-        // Parse user
-        let (user, next) =
-            find(next + 1, &line, &space).map_err(|_| LogError::new(&line, "User not found"))?;
-        let user = match user.as_str() {
-            "-" => None,
-            _ => Some(user),
-        };
-
-        // Parse timestamp
-        let (timestamp, next) = find(next + 2, &line, &bracket)
-            .map_err(|_| LogError::new(&line, "Datetime not found"))?;
-        let timestamp = DateTime::parse_from_str(timestamp.as_str(), "%d/%b/%Y:%H:%M:%S %z")
-            .map(|parsed| parsed.with_timezone(&Utc))
-            .map_err(|_| LogError::new(&line, "Invalid datetime"))?;
-        if timestamp.timestamp_micros() <= config.timestamp {
-            return Err(LogError::new_filtered(&line));
-        }
-
-        let (request, _) =
-            find(next + 3, &line, &quote).map_err(|_| LogError::new(&line, "Request not found"))?;
-        if request.len() == 0 {
-            return Err(LogError::new(&line, "Empty request"));
-        }
-
-        // Parse method
-        let (method, next) = find(next + 3, &line, &space)
-            .map_err(|_| LogError::new(&line, "HTTP method not found"))?;
-        let method = HttpMethod::new(method.as_str())
-            .map_err(|_| LogError::new(&line, "Invalid HTTP method"))?;
-
-        // Parse path, query and extension
-        let (mut fullpath, next) =
-            find(next + 1, &line, &http).map_err(|_| LogError::new(&line, "Path not found"))?;
-
-        while fullpath.starts_with("//") {
-            fullpath = fullpath.replacen("//", "/", 1);
-        }
-
-        let url = config
-            .origin
-            .join(&fullpath)
-            .map_err(|_| LogError::new(&line, "Path not valid"))?;
-        if url.host_str() != config.origin.host_str() {
-            return Err(LogError::new(&line, "Path has a different host"));
-        }
-        let path = url.path().to_string();
-        let query = url.query().map(|q| q.to_string());
-
-        let extension = Path::new(&path)
-            .extension()
-            .map(|ext| ext.to_str().unwrap().to_lowercase().to_string());
-
-        // Parse HTTP version
-        let (http_version, next) = find(next + 1, &line, &quote)
-            .map_err(|_| LogError::new(&line, "HTTP version not found"))?;
-        let http_version = HttpVersion::new(http_version.as_str())
-            .map_err(|_| LogError::new(&line, "Invalid HTTP version"))?;
-
-        // Parse status code
-        let (status_code, next) = find(next + 2, &line, &space)
-            .map_err(|_| LogError::new(&line, "Status code not found"))?;
-        let status_code: u16 = status_code
-            .parse()
-            .map_err(|_| LogError::new(&line, "Invalid status code"))?;
-
-        // Parse size
-        let (size, next) =
-            find(next + 1, &line, &space).map_err(|_| LogError::new(&line, "Size not found"))?;
-        let size: usize = size
-            .parse()
-            .map_err(|_| LogError::new(&line, "Invalid size"))?;
-
-        // Parse referer
-        let (referer, next) =
-            find(next + 2, &line, &quote).map_err(|_| LogError::new(&line, "Referer not found"))?;
-        let referer = Url::parse(&referer).ok();
-        let (referer_origin, referer_path, referer_query) = referer.as_ref().map_or_else(
-            || (None, None, None),
-            |url| {
-                (
-                    Some(url.origin()),
-                    Some(url.path().to_string()),
-                    url.query().map(|q| q.to_string()),
-                )
-            },
-        );
-
-        // Parse user agent
-        let (user_agent, _) = find(next + 3, &line, &quote)
-            .map_err(|_| LogError::new(&line, "User agent not found"))?;
-
-        let user_agent = if user_agent.is_empty() {
-            None
-        } else {
-            Some(user_agent)
-        };
-
-        // Parse agent data
-        let (
-            browser,
-            browser_major,
-            browser_minor,
-            browser_patch,
-            browser_patch_minor,
-            os,
-            os_major,
-            os_minor,
-            os_patch,
-            os_patch_minor,
-            device,
-            brand,
-            model,
-        ) = user_agent
-            .as_ref()
-            .map(|ua| {
-                let agent = services.get_agent(ua);
-
-                (
-                    agent.browser.clone(),
-                    agent.browser_major.clone(),
-                    agent.browser_minor.clone(),
-                    agent.browser_patch.clone(),
-                    agent.browser_patch_minor.clone(),
-                    agent.os.clone(),
-                    agent.os_major.clone(),
-                    agent.os_minor.clone(),
-                    agent.os_patch.clone(),
-                    agent.os_patch_minor.clone(),
-                    agent.device.clone(),
-                    agent.brand.clone(),
-                    agent.model.clone(),
-                )
-            })
-            .unwrap_or((
-                None, None, None, None, None, None, None, None, None, None, None, None, None,
-            ));
-
-        // Parse geolocation
-        let (country, continent, asn, as_name, as_domain) = {
-            let geolocation = services.get_geolocation(&ip);
-            (
-                geolocation.country.clone(),
-                geolocation.continent.clone(),
-                geolocation.asn.clone(),
-                geolocation.as_name.clone(),
-                geolocation.as_domain.clone(),
-            )
-        };
-
-        Ok(LogEntry {
-            line,
-            ip,
-            identity,
-            user,
-            timestamp,
-            method,
-            path,
-            extension,
-            query,
-            http_version,
-            status_code,
-            size,
-            referer,
-            referer_origin,
-            referer_path,
-            referer_query,
-            user_agent,
-            browser,
-            browser_major,
-            browser_minor,
-            browser_patch,
-            browser_patch_minor,
-            os,
-            os_major,
-            os_minor,
-            os_patch,
-            os_patch_minor,
-            device,
-            brand,
-            model,
-            country,
-            continent,
-            asn,
-            as_name,
-            as_domain,
-        })
-    }
+#[derive(Serialize, Deserialize, Debug)]
+struct JsonLine {
+    pub msg: String,
+    pub ts: f64,
+    pub request: JsonLineRequest,
+    bytes_read: u16,
+    user_id: String,
+    duration: f64,
+    size: usize,
+    status: u16,
+    resp_headers: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug)]
