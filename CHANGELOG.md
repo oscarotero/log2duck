@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/) and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-02-15
+### Added
+- New `--json` flag to parse logs as JSON objects.
+
+### Fixed
+- Updated resources (ip info database and regexes to parse user agents).
+
 ## [0.2.0] - 2025-08-06
 ### Removed
 - BREAKING: Removed `parsed_query` and `referer_parsed_query`.
@@ -19,6 +26,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.1.0] - 2025-08-05
 First version
 
+[0.2.1]: https://github.com/oscarotero/log2duck/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/oscarotero/log2duck/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/oscarotero/log2duck/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/oscarotero/log2duck/releases/tag/v0.1.0

@@ -20,8 +20,12 @@ fn main() -> () {
     let origin = args.get(2).unwrap();
     let output = replace_extension(&input, ".db");
     let errors = replace_extension(&input, ".err");
+    let is_json = match args.get(3) {
+        Some(value) => value == "--json",
+        None => false,
+    };
 
-    return parse(input, &output, &errors, origin, false);
+    return parse(input, &output, &errors, origin, is_json);
 }
 
 fn parse(input: &str, output: &str, errors: &str, origin: &str, is_json: bool) {
